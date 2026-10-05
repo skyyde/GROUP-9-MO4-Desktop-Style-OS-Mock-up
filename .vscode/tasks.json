@@ -1,0 +1,23 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build GLFW window",
+            "type": "process",
+            "command": "cmd.exe",
+            "args": ["/d", "/c", "build.cmd"],
+            "options": { "cwd": "${workspaceFolder}" },
+            "problemMatcher": ["$msCompile"],
+            "group": { "kind": "build", "isDefault": true }
+        },
+        {
+            "label": "Run GLFW window",
+            "type": "process",
+            "command": "${workspaceFolder}/build/desktop-os.exe",
+            "options": { "cwd": "${workspaceFolder}" },
+            "dependsOn": "Build GLFW window",
+            "problemMatcher": [],
+            "presentation": { "reveal": "always", "panel": "dedicated" }
+        }
+    ]
+}
