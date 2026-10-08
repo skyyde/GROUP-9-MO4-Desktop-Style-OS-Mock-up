@@ -42,7 +42,9 @@ void drawFrame(GLFWwindow* window)
     ImGui::NewFrame();
 
     // Call components each rendered frame. Desktop comes first as the base layer;
-    // its UI is still a TODO in Desktop.cpp. Taskbar and Task Manager are also stubs.
+    // its UI is still a TODO in Desktop.cpp. Task Manager are also stubs.
+    // The taskbar reserves its strip of the desktop first so the clock/PWR stay clear of it.
+    ApplyTaskbarLayout();
     RenderDesktop(state);
     RenderTaskbar(state);
     // Apps currently draws the demo; the two required app screens belong there.
