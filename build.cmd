@@ -17,14 +17,14 @@ if not exist "build" mkdir "build"
 if not exist "build" exit /b 1
 
 rem /MT matches glfw3_mt.lib: GLFW and the C++ runtime are linked statically.
-rem Compile ImGui core, the demo, and only the GLFW/OpenGL3 backends.
+rem Compile the desktop components, ImGui core, and GLFW/OpenGL3 backends.
 cl /nologo /std:c++17 /EHsc /W4 /Zi /Od /MT ^
     /I"glfw\include" /I"imgui-master" /I"imgui-master\backends" ^
     "src\main.cpp" "src\Desktop.cpp" "src\Taskbar.cpp" ^
     "src\Apps.cpp" "src\TaskManager.cpp" ^
+    "src\TodoList.cpp" "src\MusicPlayer.cpp" ^
     "imgui-master\imgui.cpp" "imgui-master\imgui_draw.cpp" ^
     "imgui-master\imgui_tables.cpp" "imgui-master\imgui_widgets.cpp" ^
-    "imgui-master\imgui_demo.cpp" ^
     "imgui-master\backends\imgui_impl_glfw.cpp" ^
     "imgui-master\backends\imgui_impl_opengl3.cpp" ^
     /Fo"build\\" /Fd"build\compiler.pdb" /Fe"build\desktop-os.exe" ^

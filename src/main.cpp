@@ -41,13 +41,10 @@ void drawFrame(GLFWwindow* window)
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
-    // Call components each rendered frame. Desktop comes first as the base layer;
-    // its UI is still a TODO in Desktop.cpp. Task Manager are also stubs.
-    // The taskbar reserves its strip of the desktop first so the clock/PWR stay clear of it.
+    // Reserve taskbar space, then draw the desktop, panel, and app windows.
     ApplyTaskbarLayout();
     RenderDesktop(state);
     RenderTaskbar(state);
-    // Apps currently draws the demo; the two required app screens belong there.
     RenderApps(state);
     RenderTaskManager(state);
 
@@ -55,7 +52,7 @@ void drawFrame(GLFWwindow* window)
     ImGui::Render();
 
     glViewport(0, 0, width, height);
-    // Existing solid background; Desktop.cpp will own the wallpaper UI.
+    // Clear beneath the desktop wallpaper.
     glClearColor(0.12f, 0.14f, 0.18f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
@@ -102,7 +99,7 @@ int main()
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     ImGui::StyleColorsDark();
 
-    // Install GLFW input callbacks so the demo responds to mouse and keyboard.
+    // Install GLFW input callbacks for mouse and keyboard controls.
     if (!ImGui_ImplGlfw_InitForOpenGL(window, true)) {
         std::cerr << "Could not initialize the ImGui GLFW backend.\n";
         ImGui::DestroyContext();
@@ -124,7 +121,7 @@ int main()
     glfwSetFramebufferSizeCallback(window, onFramebufferResize);
     glfwSetWindowRefreshCallback(window, drawFrame);
 
-    // Run until the window closes or a component requests shutdown (future PWR).
+    // Run until the window closes or a component requests shutdown.
     while (!glfwWindowShouldClose(window) && !state.shutdownRequested) {
         // Process input and window events before starting the next frame.
         glfwPollEvents();

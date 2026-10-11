@@ -1,489 +1,138 @@
-
 #include "Apps.h"
-#include "AppState.h"
 #include "Desktop.h"
+#include "TodoList.h"
+#include "MusicPlayer.h"
 #include "imgui.h"
+#include "imgui_internal.h"
 
 #include <algorithm>
-#include <cfloat>
-#include <cmath>
-#include <cstdio>
 
-namespace
+ImGuiWindowFlags ConfigureAppWindow(AppWindowState& window,
+    const ImVec2& defaultPosition, const ImVec2& defaultSize)
 {
-    // ------------------------------------------------------------
-    // App 2 settings
-    // ------------------------------------------------------------
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const DesktopSettings& desktop = GetDesktopSettings();
+    const float usableWidth = std::max(1.0f, viewport->Size.x);
+    const float usableHeight = std::max(
+        1.0f, viewport->Size.y - desktop.topReserved - desktop.bottomReserved);
+    const ImVec2 minimumSize(std::min(300.0f, usableWidth), std::min(260.0f, usableHeight));
+    const ImVec2 desktopOrigin(viewport->Pos.x, viewport->Pos.y + desktop.topReserved);
+    ImVec2 size(
+        std::clamp(defaultSize.x, minimumSize.x, usableWidth),
+        std::clamp(defaultSize.y, minimumSize.y, usableHeight));
+    ImVec2 position(
+        viewport->Pos.x + std::clamp(defaultPosition.x, 0.0f, usableWidth - size.x),
+        viewport->Pos.y + desktop.topReserved
+            + std::clamp(defaultPosition.y, 0.0f, usableHeight - size.y));
 
-    struct App2Settings
+    ImGuiCond condition = ImGuiCond_Appearing;
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings;
+    if (window.maximized)
     {
-        const char* title = "Music Player";
-        ImVec2 defaultPos = ImVec2(280.0f, 90.0f);
-        ImVec2 defaultSize = ImVec2(420.0f, 400.0f);
-        int defaultVolume = 70;
-        bool autoplay = false;
-        ImU32 accentColor = IM_COL32(120, 255, 140, 255);
-    };
-
-    App2Settings g_app2Settings;
-
-    // ------------------------------------------------------------
-    // App 2 playlist
-    // ------------------------------------------------------------
-
-    struct Track
+        position = desktopOrigin;
+        size = ImVec2(usableWidth, usableHeight);
+        condition = ImGuiCond_Always;
+        flags |= ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize;
+    }
+    else if (window.restorePending)
     {
-        const char* title;
-        const char* artist;
-        int seconds;
-    };
-
-    const Track kTracks[] =
-    {
-        { "Midnight Scheduler", "The Round Robins", 214 },
-        { "Context Switch", "Kernel Panic", 187 },
-        { "Race Condition", "Mutex & The Locks", 246 },
-        { "Heap Dreams", "Segfault Sisters", 203 },
-        { "Idle Loop", "Null Pointers", 172 },
-    };
-
-    const int kTrackCount =
-        static_cast<int>(sizeof(kTracks) / sizeof(kTracks[0]));
-
-    // ------------------------------------------------------------
-    // App 2 runtime state
-    // ------------------------------------------------------------
-
-    int g_currentTrack = 0;
-    float g_elapsed = 0.0f;
-    bool g_playing = false;
-    int g_volume = 70;
-    bool g_wasOpen = false;
-
-    void FormatTime(char* out, size_t size, int totalSeconds)
-    {
-        std::snprintf(
-            out,
-            size,
-            "%d:%02d",
-            totalSeconds / 60,
-            totalSeconds % 60
-        );
+        // Clamp saved bounds if the desktop was resized while maximized.
+        size = ImVec2(
+            std::clamp(window.restoreSize.x, minimumSize.x, usableWidth),
+            std::clamp(window.restoreSize.y, minimumSize.y, usableHeight));
+        position = ImVec2(
+            std::clamp(window.restorePosition.x, desktopOrigin.x,
+                desktopOrigin.x + usableWidth - size.x),
+            std::clamp(window.restorePosition.y, desktopOrigin.y,
+                desktopOrigin.y + usableHeight - size.y));
+        condition = ImGuiCond_Always;
+        window.restorePending = false;
     }
 
-    void SelectTrack(int index)
-    {
-        g_currentTrack =
-            (index % kTrackCount + kTrackCount) % kTrackCount;
+    ImGui::SetNextWindowPos(position, condition);
+    ImGui::SetNextWindowSize(size, condition);
+    ImGui::SetNextWindowSizeConstraints(minimumSize, ImVec2(usableWidth, usableHeight));
+    return flags;
+}
 
-        g_elapsed = 0.0f;
+void RenderAppTitleBarControls(AppWindowState& window)
+{
+    ImGuiWindow* currentWindow = ImGui::GetCurrentWindow();
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const ImRect titleBar = currentWindow->TitleBarRect();
+    const float buttonSize = ImGui::GetFontSize();
+    // Match ImGui's close-button spacing, one slot to its left.
+    const ImVec2 position(
+        titleBar.Max.x - currentWindow->WindowBorderSize - style.FramePadding.x
+            - buttonSize * 2.0f - style.ItemInnerSpacing.x,
+        titleBar.Min.y + style.FramePadding.y);
+    const ImRect bounds(position, ImVec2(position.x + buttonSize, position.y + buttonSize));
+    const ImGuiID id = currentWindow->GetID("##Maximize");
+
+    // Title-bar widgets use the menu navigation layer and must bypass content clipping.
+    // ItemAdd/ButtonBehavior avoid changing the app's content cursor or scroll extent.
+    ImRect clip = titleBar;
+    clip.ClipWith(currentWindow->OuterRectClipped);
+    ImGui::PushClipRect(clip.Min, clip.Max, false);
+    const ImGuiNavLayer previousLayer = currentWindow->DC.NavLayerCurrent;
+    currentWindow->DC.NavLayerCurrent = ImGuiNavLayer_Menu;
+    ImGui::PushItemFlag(ImGuiItemFlags_NoNavDefaultFocus, true);
+    bool hovered = false;
+    bool held = false;
+    bool pressed = false;
+    if (ImGui::ItemAdd(bounds, id))
+    {
+        pressed = ImGui::ButtonBehavior(bounds, id, &hovered, &held);
+        ImDrawList* drawList = currentWindow->DrawList;
+        if (hovered || held)
+        {
+            drawList->AddRectFilled(bounds.Min, bounds.Max,
+                ImGui::GetColorU32(held ? ImGuiCol_ButtonActive : ImGuiCol_ButtonHovered));
+        }
+        ImGui::RenderNavCursor(bounds, id, ImGuiNavRenderCursorFlags_Compact);
+
+        const float inset = buttonSize * 0.2f;
+        const ImVec2 iconMin(position.x + inset, position.y + inset);
+        const ImVec2 iconMax(position.x + buttonSize - inset, position.y + buttonSize - inset);
+        const ImU32 color = ImGui::GetColorU32(ImGuiCol_Text);
+        if (window.maximized)
+        {
+            const float offset = buttonSize * 0.2f;
+            drawList->AddLine(ImVec2(iconMin.x + offset, iconMin.y),
+                ImVec2(iconMax.x, iconMin.y), color);
+            drawList->AddLine(ImVec2(iconMax.x, iconMin.y),
+                ImVec2(iconMax.x, iconMax.y - offset), color);
+            drawList->AddRect(ImVec2(iconMin.x, iconMin.y + offset),
+                ImVec2(iconMax.x - offset, iconMax.y), color);
+        }
+        else
+        {
+            drawList->AddRect(iconMin, iconMax, color);
+        }
+        ImGui::SetItemTooltip("%s", window.maximized ? "Restore" : "Maximize");
     }
+    ImGui::PopItemFlag();
+    currentWindow->DC.NavLayerCurrent = previousLayer;
+    ImGui::PopClipRect();
 
-    // ------------------------------------------------------------
-    // App 2 vinyl artwork
-    // ------------------------------------------------------------
-
-    void DrawVinyl(
-        ImDrawList* drawList,
-        ImVec2 center,
-        float radius,
-        float angle,
-        bool playing
-    )
+    if (pressed)
     {
-        drawList->AddCircleFilled(
-            center,
-            radius,
-            IM_COL32(24, 26, 34, 255),
-            48
-        );
-
-        for (int i = 1; i <= 3; ++i)
+        if (window.maximized)
         {
-            drawList->AddCircle(
-                center,
-                radius * (0.45f + 0.15f * static_cast<float>(i)),
-                IM_COL32(60, 64, 78, 255),
-                48,
-                1.0f
-            );
+            window.maximized = false;
+            window.restorePending = true;
         }
-
-        drawList->AddCircleFilled(
-            center,
-            radius * 0.32f,
-            playing
-                ? g_app2Settings.accentColor
-                : IM_COL32(120, 128, 145, 255),
-            32
-        );
-
-        drawList->AddCircleFilled(
-            center,
-            radius * 0.06f,
-            IM_COL32(24, 26, 34, 255),
-            16
-        );
-
-        const ImVec2 a(
-            center.x + std::cos(angle) * radius * 0.40f,
-            center.y + std::sin(angle) * radius * 0.40f
-        );
-
-        const ImVec2 b(
-            center.x + std::cos(angle) * radius * 0.92f,
-            center.y + std::sin(angle) * radius * 0.92f
-        );
-
-        drawList->AddLine(
-            a,
-            b,
-            IM_COL32(255, 255, 255, 70),
-            2.0f
-        );
-    }
-
-    // ------------------------------------------------------------
-    // App 1 placeholder
-    // Replace this function when App 1 is implemented.
-    // ------------------------------------------------------------
-
-    void RenderApp1(AppState& state)
-    {
-        if (!state.showFirstApp)
+        else
         {
-            return;
-        }
-
-        ImGui::SetNextWindowSize(
-            ImVec2(420.0f, 300.0f),
-            ImGuiCond_Appearing
-        );
-
-        const ImGuiWindowFlags flags =
-            ImGuiWindowFlags_NoCollapse |
-            ImGuiWindowFlags_NoSavedSettings;
-
-        if (ImGui::Begin("App 1", &state.showFirstApp, flags))
-        {
-            ImGui::Text("App 1");
-            ImGui::Separator();
-            ImGui::TextWrapped(
-                "App 1 content will be implemented separately."
-            );
-        }
-
-        ImGui::End();
-    }
-
-    // ------------------------------------------------------------
-    // App 2: Music Player
-    // ------------------------------------------------------------
-
-    void RenderApp2(AppState& state)
-    {
-        if (!state.showSecondApp)
-        {
-            g_wasOpen = false;
-            g_playing = false;
-            return;
-        }
-
-        const ImGuiViewport* viewport = ImGui::GetMainViewport();
-        const DesktopSettings& desktop = GetDesktopSettings();
-
-        // Reset the player whenever the app is opened again.
-        if (!g_wasOpen)
-        {
-            g_wasOpen = true;
-            g_playing = g_app2Settings.autoplay;
-            g_volume = std::clamp(
-                g_app2Settings.defaultVolume,
-                0,
-                100
-            );
-
-            SelectTrack(0);
-            ImGui::SetNextWindowFocus();
-        }
-
-        // Keep the window inside the usable desktop area.
-        const float usableW =
-            std::max(100.0f, viewport->Size.x);
-
-        const float usableH =
-            std::max(
-                100.0f,
-                viewport->Size.y
-                    - desktop.topReserved
-                    - desktop.bottomReserved
-            );
-
-        const ImVec2 size(
-            std::min(g_app2Settings.defaultSize.x, usableW),
-            std::min(g_app2Settings.defaultSize.y, usableH)
-        );
-
-        const ImVec2 pos(
-            std::clamp(
-                g_app2Settings.defaultPos.x,
-                0.0f,
-                usableW - size.x
-            ),
-            std::clamp(
-                g_app2Settings.defaultPos.y,
-                0.0f,
-                usableH - size.y
-            )
-        );
-
-        ImGui::SetNextWindowPos(
-            ImVec2(
-                viewport->Pos.x + pos.x,
-                viewport->Pos.y + desktop.topReserved + pos.y
-            ),
-            ImGuiCond_Appearing
-        );
-
-        ImGui::SetNextWindowSize(size, ImGuiCond_Appearing);
-
-        ImGui::SetNextWindowSizeConstraints(
-            ImVec2(300.0f, 260.0f),
-            ImVec2(FLT_MAX, FLT_MAX)
-        );
-
-        const ImGuiWindowFlags flags =
-            ImGuiWindowFlags_NoCollapse |
-            ImGuiWindowFlags_NoSavedSettings;
-
-        // Closing the window updates the same flag used by the taskbar.
-        if (ImGui::Begin(
-            g_app2Settings.title,
-            &state.showSecondApp,
-            flags
-        ))
-        {
-            ImDrawList* drawList = ImGui::GetWindowDrawList();
-            ImFont* font = ImGui::GetFont();
-            const float dt = ImGui::GetIO().DeltaTime;
-
-            // Advance the simulated playback timer.
-            if (g_playing)
-            {
-                g_elapsed += dt;
-
-                if (g_elapsed >=
-                    static_cast<float>(kTracks[g_currentTrack].seconds))
-                {
-                    SelectTrack(g_currentTrack + 1);
-                }
-            }
-
-            const Track& track = kTracks[g_currentTrack];
-
-            // Now-playing section.
-            const ImVec2 origin = ImGui::GetCursorScreenPos();
-            const float art = 92.0f;
-
-            DrawVinyl(
-                drawList,
-                ImVec2(
-                    origin.x + art * 0.5f,
-                    origin.y + art * 0.5f
-                ),
-                art * 0.5f,
-                static_cast<float>(ImGui::GetTime())
-                    * (g_playing ? 3.0f : 0.0f),
-                g_playing
-            );
-
-            drawList->AddText(
-                font,
-                12.0f,
-                ImVec2(origin.x + art + 16.0f, origin.y + 4.0f),
-                IM_COL32(150, 158, 175, 255),
-                g_playing ? "NOW PLAYING" : "PAUSED"
-            );
-
-            drawList->AddText(
-                font,
-                24.0f,
-                ImVec2(origin.x + art + 16.0f, origin.y + 22.0f),
-                IM_COL32(240, 244, 252, 255),
-                track.title
-            );
-
-            drawList->AddText(
-                font,
-                15.0f,
-                ImVec2(origin.x + art + 16.0f, origin.y + 54.0f),
-                IM_COL32(170, 178, 195, 255),
-                track.artist
-            );
-
-            ImGui::Dummy(ImVec2(0.0f, art + 8.0f));
-
-            // Progress bar and elapsed / total time.
-            char elapsedText[16];
-            char totalText[16];
-
-            FormatTime(
-                elapsedText,
-                sizeof(elapsedText),
-                static_cast<int>(g_elapsed)
-            );
-
-            FormatTime(
-                totalText,
-                sizeof(totalText),
-                track.seconds
-            );
-
-            ImGui::PushStyleColor(
-                ImGuiCol_PlotHistogram,
-                ImGui::ColorConvertU32ToFloat4(
-                    g_app2Settings.accentColor
-                )
-            );
-
-            ImGui::ProgressBar(
-                g_elapsed / static_cast<float>(track.seconds),
-                ImVec2(-FLT_MIN, 8.0f),
-                ""
-            );
-
-            ImGui::PopStyleColor();
-
-            ImGui::TextDisabled("%s", elapsedText);
-
-            ImGui::SameLine(
-                ImGui::GetContentRegionMax().x
-                    - ImGui::CalcTextSize(totalText).x
-            );
-
-            ImGui::TextDisabled("%s", totalText);
-
-            // Previous, play / pause, and next controls.
-            const ImVec2 buttonSize(76.0f, 30.0f);
-
-            const float rowWidth =
-                buttonSize.x * 3
-                + ImGui::GetStyle().ItemSpacing.x * 2;
-
-            ImGui::SetCursorPosX(
-                (ImGui::GetWindowWidth() - rowWidth) * 0.5f
-            );
-
-            if (ImGui::Button("|<  Prev", buttonSize))
-            {
-                SelectTrack(g_currentTrack - 1);
-            }
-
-            ImGui::SameLine();
-
-            if (ImGui::Button(
-                g_playing ? "Pause" : "Play",
-                buttonSize
-            ))
-            {
-                g_playing = !g_playing;
-            }
-
-            ImGui::SameLine();
-
-            if (ImGui::Button("Next  >|", buttonSize))
-            {
-                SelectTrack(g_currentTrack + 1);
-            }
-
-            ImGui::Spacing();
-
-            ImGui::SetNextItemWidth(-60.0f);
-
-            ImGui::SliderInt(
-                "Volume",
-                &g_volume,
-                0,
-                100,
-                "%d%%"
-            );
-
-            // Playlist: selecting a track starts simulated playback.
-            ImGui::Separator();
-
-            ImGui::TextDisabled(
-                "PLAYLIST  (%d tracks)",
-                kTrackCount
-            );
-
-            if (ImGui::BeginChild(
-                "##playlist",
-                ImVec2(0.0f, 0.0f),
-                ImGuiChildFlags_Borders
-            ))
-            {
-                for (int i = 0; i < kTrackCount; ++i)
-                {
-                    char timeText[16];
-                    char row[128];
-
-                    FormatTime(
-                        timeText,
-                        sizeof(timeText),
-                        kTracks[i].seconds
-                    );
-
-                    std::snprintf(
-                        row,
-                        sizeof(row),
-                        "%02d   %s - %s",
-                        i + 1,
-                        kTracks[i].title,
-                        kTracks[i].artist
-                    );
-
-                    ImGui::PushID(i);
-
-                    if (ImGui::Selectable(
-                        row,
-                        i == g_currentTrack
-                    ))
-                    {
-                        SelectTrack(i);
-                        g_playing = true;
-                    }
-
-                    ImGui::SameLine(
-                        ImGui::GetContentRegionMax().x
-                            - ImGui::CalcTextSize(timeText).x
-                    );
-
-                    ImGui::TextDisabled("%s", timeText);
-
-                    ImGui::PopID();
-                }
-            }
-
-            ImGui::EndChild();
-        }
-
-        ImGui::End();
-
-        // Stop playback immediately if the X button was clicked.
-        if (!state.showSecondApp)
-        {
-            g_wasOpen = false;
-            g_playing = false;
+            window.restorePosition = ImGui::GetWindowPos();
+            window.restoreSize = ImGui::GetWindowSize();
+            window.maximized = true;
         }
     }
 }
 
-// ------------------------------------------------------------
-// Shared application renderer
-// ------------------------------------------------------------
-
 void RenderApps(AppState& state)
 {
-    RenderApp1(state);
-    RenderApp2(state);
+    RenderTodoList(state);
+    RenderMusicPlayer(state);
 }

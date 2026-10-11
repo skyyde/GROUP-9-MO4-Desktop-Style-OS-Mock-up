@@ -2,182 +2,219 @@
 #include "AppState.h"
 #include "Desktop.h"
 #include "imgui.h"
+
 #include <algorithm>
 #include <cfloat>
 #include <cstdio>
 
 namespace
 {
-TaskbarSettings g_settings;
+    const TaskbarSettings kSettings;
 
-const char* const kTaskbarWindowName = "##Taskbar";
+    const char* const kTaskbarWindowName = "##Taskbar";
 
-// Taskbar thickness actually used this frame: never taller than the window itself.
-float EffectiveHeight(const ImGuiViewport* vp)
-{
-    return std::max(0.0f, std::min(g_settings.height, vp->Size.y));
-}
+    // Taskbar thickness actually used this frame: never taller than the window itself.
+    float EffectiveHeight(const ImGuiViewport* viewport)
+    {
+        return std::max(0.0f, std::min(kSettings.height, viewport->Size.y));
+    }
 
-// icons: drawn with ImGui draw commands so no image assets are needed.
-// c = icon center, s = icon box size in pixels.
+    // To-Do List icon: a window with a title bar and content lines.
+    void DrawTodoListIcon(ImDrawList* drawList, ImVec2 center, float iconSize, ImU32 color)
+    {
+        const float halfSize = iconSize * 0.5f;
+        const ImVec2 a(center.x - halfSize, center.y - halfSize * 0.85f);
+        const ImVec2 b(center.x + halfSize, center.y + halfSize * 0.85f);
+        drawList->AddRect(a, b, color, 3.0f, 0, 1.6f);
+        drawList->AddLine(ImVec2(a.x, a.y + iconSize * 0.28f), ImVec2(b.x, a.y + iconSize * 0.28f), color, 1.6f);
+        drawList->AddLine(ImVec2(a.x + iconSize * 0.18f, center.y + iconSize * 0.08f),
+            ImVec2(b.x - iconSize * 0.18f, center.y + iconSize * 0.08f), color, 1.4f);
+        drawList->AddLine(ImVec2(a.x + iconSize * 0.18f, center.y + iconSize * 0.26f),
+            ImVec2(center.x + iconSize * 0.08f, center.y + iconSize * 0.26f), color, 1.4f);
+    }
 
-// App 1: a window with a title bar and content lines.
-void DrawIconWindow(ImDrawList* dl, ImVec2 c, float s, ImU32 col)
-{
-    const float h = s * 0.5f;
-    const ImVec2 a(c.x - h, c.y - h * 0.85f), b(c.x + h, c.y + h * 0.85f);
-    dl->AddRect(a, b, col, 3.0f, 0, 1.6f);
-    dl->AddLine(ImVec2(a.x, a.y + s * 0.28f), ImVec2(b.x, a.y + s * 0.28f), col, 1.6f);
-    dl->AddLine(ImVec2(a.x + s * 0.18f, c.y + s * 0.08f), ImVec2(b.x - s * 0.18f, c.y + s * 0.08f), col, 1.4f);
-    dl->AddLine(ImVec2(a.x + s * 0.18f, c.y + s * 0.26f), ImVec2(c.x + s * 0.08f, c.y + s * 0.26f), col, 1.4f);
-}
-
-// App 2: a 2x2 grid of tiles.
-void DrawIconGrid(ImDrawList* dl, ImVec2 c, float s, ImU32 col)
-{
-    const float gap = s * 0.12f;
-    const float tile = (s - gap) * 0.5f - s * 0.04f;
-    for (int row = 0; row < 2; ++row) {
-        for (int colIdx = 0; colIdx < 2; ++colIdx) {
-            const float x = c.x - gap * 0.5f - tile + (tile + gap) * static_cast<float>(colIdx);
-            const float y = c.y - gap * 0.5f - tile + (tile + gap) * static_cast<float>(row);
-            dl->AddRectFilled(ImVec2(x, y), ImVec2(x + tile, y + tile), col, 2.5f);
+    // Music Player icon: a 2x2 grid of tiles.
+    void DrawMusicPlayerIcon(ImDrawList* drawList, ImVec2 center, float iconSize, ImU32 color)
+    {
+        const float gap = iconSize * 0.12f;
+        const float tile = (iconSize - gap) * 0.5f - iconSize * 0.04f;
+        for (int row = 0; row < 2; ++row)
+        {
+            for (int colIdx = 0; colIdx < 2; ++colIdx)
+            {
+                const float x = center.x - gap * 0.5f - tile + (tile + gap) * static_cast<float>(colIdx);
+                const float y = center.y - gap * 0.5f - tile + (tile + gap) * static_cast<float>(row);
+                drawList->AddRectFilled(ImVec2(x, y), ImVec2(x + tile, y + tile), color, 2.5f);
+            }
         }
     }
-}
 
-// Task Manager: activity bars.
-void DrawIconActivity(ImDrawList* dl, ImVec2 c, float s, ImU32 col)
-{
-    const float barW = s * 0.18f;
-    const float gap = s * 0.10f;
-    const float heights[] = { 0.45f, 0.85f, 0.60f, 1.00f };
-    const float total = 4 * barW + 3 * gap;
-    const float bottom = c.y + s * 0.5f;
-    for (int i = 0; i < 4; ++i) {
-        const float x = c.x - total * 0.5f + (barW + gap) * static_cast<float>(i);
-        dl->AddRectFilled(ImVec2(x, bottom - s * heights[i]), ImVec2(x + barW, bottom), col, 1.5f);
-    }
-}
-
-using IconFn = void (*)(ImDrawList*, ImVec2, float, ImU32);
-
-// One taskbar entry. `flag` points at the shared visibility flag in AppState,
-// so the button, the app window, and the running indicator can never disagree.
-struct TaskbarButton
-{
-    const char* label;
-    IconFn drawIcon;
-    bool AppState::* flag;
-};
-
-// Pill-shaped, non-clickable brand label on the left of the panel.
-float DrawBrand(ImDrawList* dl, ImVec2 origin, float panelHeight)
-{
-    const char* text = g_settings.brandText;
-    if (text == nullptr || text[0] == '\0') {
-        return 0.0f;
-    }
-    const float fontSize = 15.0f;
-    ImFont* font = ImGui::GetFont();
-    const ImVec2 textSize = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, text);
-    const ImVec2 pill(textSize.x + 28.0f, 28.0f);
-    const ImVec2 p0(origin.x, origin.y + (panelHeight - pill.y) * 0.5f);
-    const ImVec2 p1(p0.x + pill.x, p0.y + pill.y);
-    dl->AddRectFilled(p0, p1, IM_COL32(255, 255, 255, 18), pill.y * 0.5f);
-    dl->AddCircleFilled(ImVec2(p0.x + 12.0f, p0.y + pill.y * 0.5f), 4.0f, g_settings.accentColor);
-    dl->AddText(font, fontSize, ImVec2(p0.x + 22.0f, p0.y + (pill.y - textSize.y) * 0.5f),
-                IM_COL32(235, 240, 250, 255), text);
-    return pill.x;
-}
-
-// Draws one icon button; returns true when it was clicked this frame.
-bool DrawTaskbarButton(ImDrawList* dl, const TaskbarButton& btn, bool running, ImVec2 pos, float panelHeight,
-                       float* outWidth)
-{
-    const float iconSize = 18.0f;
-    const float fontSize = 15.0f;
-    const bool hasLabel = g_settings.showLabels && btn.label != nullptr && btn.label[0] != '\0';
-    ImFont* font = ImGui::GetFont();
-    const float labelW = hasLabel ? font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, btn.label).x : 0.0f;
-    const float sidePad = 12.0f;
-    const float width = sidePad * 2 + iconSize + (hasLabel ? 8.0f + labelW : 0.0f);
-    const ImVec2 size(width, g_settings.buttonHeight);
-    const ImVec2 p0(pos.x, pos.y + (panelHeight - size.y) * 0.5f);
-    const ImVec2 p1(p0.x + size.x, p0.y + size.y);
-    *outWidth = width;
-
-    ImGui::SetCursorScreenPos(p0);
-    const bool clicked = ImGui::InvisibleButton("##btn", size);
-    const bool hovered = ImGui::IsItemHovered();
-    const bool held = ImGui::IsItemActive();
-
-    // Tooltip tells the person what the click will do.
-    const char* name = (btn.label != nullptr && btn.label[0] != '\0') ? btn.label : "App";
-    if (running) {
-        ImGui::SetItemTooltip("%s (running) - click to close", name);
-    } else {
-        ImGui::SetItemTooltip("Open %s", name);
+    // Task Manager: activity bars.
+    void DrawTaskManagerIcon(ImDrawList* drawList, ImVec2 center, float iconSize, ImU32 color)
+    {
+        const float barWidth = iconSize * 0.18f;
+        const float gap = iconSize * 0.10f;
+        const float heights[] = { 0.45f, 0.85f, 0.60f, 1.00f };
+        const float total = 4 * barWidth + 3 * gap;
+        const float bottom = center.y + iconSize * 0.5f;
+        for (int i = 0; i < 4; ++i)
+        {
+            const float x = center.x - total * 0.5f + (barWidth + gap) * static_cast<float>(i);
+            drawList->AddRectFilled(ImVec2(x, bottom - iconSize * heights[i]), ImVec2(x + barWidth, bottom), color, 1.5f);
+        }
     }
 
-    ImU32 bg = IM_COL32(255, 255, 255, 0);
-    if (held) {
-        bg = IM_COL32(255, 255, 255, 40);
-    } else if (hovered) {
-        bg = IM_COL32(255, 255, 255, 28);
-    } else if (running) {
-        bg = IM_COL32(255, 255, 255, 14);
-    }
-    dl->AddRectFilled(p0, p1, bg, 7.0f);
+    using DrawIcon = void (*)(ImDrawList*, ImVec2, float, ImU32);
 
-    const ImU32 fg = running || hovered ? IM_COL32(245, 248, 255, 255) : IM_COL32(190, 198, 212, 255);
-    btn.drawIcon(dl, ImVec2(p0.x + sidePad + iconSize * 0.5f, p0.y + size.y * 0.5f), iconSize, fg);
-    if (hasLabel) {
-        dl->AddText(font, fontSize, ImVec2(p0.x + sidePad + iconSize + 8.0f, p0.y + (size.y - fontSize) * 0.5f),
-                    fg, btn.label);
+    // Each button uses the same visibility flag as its app window.
+    struct TaskbarButton
+    {
+        const char* label;
+        DrawIcon drawIcon;
+        bool AppState::* visible;
+    };
+
+    // Pill-shaped, non-clickable brand label on the left of the panel.
+    float DrawBrand(ImDrawList* drawList, ImVec2 origin, float panelHeight)
+    {
+        const char* text = kSettings.brandText;
+        if (text == nullptr || text[0] == '\0')
+        {
+            return 0.0f;
+        }
+        const float fontSize = 15.0f;
+        ImFont* font = ImGui::GetFont();
+        const ImVec2 textSize = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, text);
+        const ImVec2 pill(textSize.x + 28.0f, 28.0f);
+        const ImVec2 p0(origin.x, origin.y + (panelHeight - pill.y) * 0.5f);
+        const ImVec2 p1(p0.x + pill.x, p0.y + pill.y);
+        drawList->AddRectFilled(p0, p1, IM_COL32(255, 255, 255, 18), pill.y * 0.5f);
+        drawList->AddCircleFilled(ImVec2(p0.x + 12.0f, p0.y + pill.y * 0.5f), 4.0f, kSettings.accentColor);
+        drawList->AddText(font, fontSize, ImVec2(p0.x + 22.0f, p0.y + (pill.y - textSize.y) * 0.5f),
+                    IM_COL32(235, 240, 250, 255), text);
+        return pill.x;
     }
 
-    // Running indicator: short accent bar along the bottom edge of the button.
-    if (running) {
-        const float barW = std::min(22.0f, size.x * 0.5f);
-        const float cx = (p0.x + p1.x) * 0.5f;
-        dl->AddRectFilled(ImVec2(cx - barW * 0.5f, p1.y - 3.0f), ImVec2(cx + barW * 0.5f, p1.y - 1.0f),
-                          g_settings.accentColor, 2.0f);
+    // Toggle the app before drawing its running indicator; return the button width.
+    float DrawTaskbarButton(ImDrawList* drawList, const TaskbarButton& button, bool& running,
+                           ImVec2 pos, float panelHeight)
+    {
+        const float iconSize = 18.0f;
+        const float fontSize = 15.0f;
+        const bool hasLabel = kSettings.showLabels && button.label != nullptr && button.label[0] != '\0';
+        ImFont* font = ImGui::GetFont();
+        const float labelWidth = hasLabel
+            ? font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, button.label).x : 0.0f;
+        const float sidePadding = 12.0f;
+        const float width = sidePadding * 2 + iconSize + (hasLabel ? 8.0f + labelWidth : 0.0f);
+        const ImVec2 size(width, kSettings.buttonHeight);
+        const ImVec2 p0(pos.x, pos.y + (panelHeight - size.y) * 0.5f);
+        const ImVec2 p1(p0.x + size.x, p0.y + size.y);
+
+        ImGui::SetCursorScreenPos(p0);
+        if (ImGui::InvisibleButton("##button", size))
+        {
+            running = !running;
+        }
+        const bool hovered = ImGui::IsItemHovered();
+        const bool held = ImGui::IsItemActive();
+
+        const char* name = (button.label != nullptr && button.label[0] != '\0') ? button.label : "App";
+        if (running)
+        {
+            ImGui::SetItemTooltip("%s (running) - click to close", name);
+        }
+        else
+        {
+            ImGui::SetItemTooltip("Open %s", name);
+        }
+
+        ImU32 backgroundColor = IM_COL32(255, 255, 255, 0);
+        if (held)
+        {
+            backgroundColor = IM_COL32(255, 255, 255, 40);
+        }
+        else if (hovered)
+        {
+            backgroundColor = IM_COL32(255, 255, 255, 28);
+        }
+        else if (running)
+        {
+            backgroundColor = IM_COL32(255, 255, 255, 14);
+        }
+        drawList->AddRectFilled(p0, p1, backgroundColor, 7.0f);
+
+        const ImU32 foregroundColor = running || hovered
+            ? IM_COL32(245, 248, 255, 255) : IM_COL32(190, 198, 212, 255);
+        const ImVec2 iconCenter(p0.x + sidePadding + iconSize * 0.5f, p0.y + size.y * 0.5f);
+        button.drawIcon(drawList, iconCenter, iconSize, foregroundColor);
+        if (hasLabel)
+        {
+            const ImVec2 textPosition(
+                p0.x + sidePadding + iconSize + 8.0f, p0.y + (size.y - fontSize) * 0.5f);
+            drawList->AddText(font, fontSize, textPosition, foregroundColor, button.label);
+        }
+
+        // Running indicator: short accent bar along the bottom edge of the button.
+        if (running)
+        {
+            const float barWidth = std::min(22.0f, size.x * 0.5f);
+            const float centerX = (p0.x + p1.x) * 0.5f;
+            drawList->AddRectFilled(
+                ImVec2(centerX - barWidth * 0.5f, p1.y - 3.0f),
+                ImVec2(centerX + barWidth * 0.5f, p1.y - 1.0f), kSettings.accentColor, 2.0f);
+        }
+        return width;
     }
-    return clicked;
-}
+
+    void DrawRunningCount(ImDrawList* drawList, ImVec2 panelMin, ImVec2 panelMax,
+                          float panelHeight, int runningCount)
+    {
+        char text[32];
+        if (runningCount == 0)
+        {
+            std::snprintf(text, sizeof(text), "No apps running");
+        }
+        else
+        {
+            std::snprintf(text, sizeof(text), "%d app%s running",
+                runningCount, runningCount == 1 ? "" : "s");
+        }
+        const float fontSize = 14.0f;
+        ImFont* font = ImGui::GetFont();
+        const ImVec2 textSize = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, text);
+        const ImVec2 textPosition(
+            panelMax.x - kSettings.padding - textSize.x,
+            panelMin.y + (panelHeight - textSize.y) * 0.5f);
+        const ImU32 textColor = runningCount > 0
+            ? kSettings.accentColor : IM_COL32(140, 148, 162, 255);
+        drawList->AddText(font, fontSize, textPosition, textColor, text);
+    }
 } // namespace
-
-TaskbarSettings& GetTaskbarSettings()
-{
-    return g_settings;
-}
 
 void ApplyTaskbarLayout()
 {
-    const ImGuiViewport* vp = ImGui::GetMainViewport();
-    const float h = EffectiveHeight(vp);
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const float height = EffectiveHeight(viewport);
     DesktopSettings& desktop = GetDesktopSettings();
-    desktop.topReserved = g_settings.position == TaskbarPosition::Top ? h : 0.0f;
-    desktop.bottomReserved = g_settings.position == TaskbarPosition::Bottom ? h : 0.0f;
+    desktop.topReserved = kSettings.position == TaskbarPosition::Top ? height : 0.0f;
+    desktop.bottomReserved = kSettings.position == TaskbarPosition::Bottom ? height : 0.0f;
 }
 
 void RenderTaskbar(AppState& state)
 {
-    // Keep the desktop's clock/PWR/status text clear of this panel. The desktop is drawn
-    // earlier in the frame, so it picks this up from the next frame on (one frame at startup).
-    ApplyTaskbarLayout();
-
-    const ImGuiViewport* vp = ImGui::GetMainViewport();
-    const float h = EffectiveHeight(vp);
-    if (vp->Size.x <= 0.0f || h <= 0.0f) {
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const float height = EffectiveHeight(viewport);
+    if (viewport->Size.x <= 0.0f || height <= 0.0f)
+    {
         return;
     }
-    const bool atTop = g_settings.position == TaskbarPosition::Top;
+    const bool atTop = kSettings.position == TaskbarPosition::Top;
 
     // Re-pinned every frame so the panel follows window resizes and can't be dragged away.
-    ImGui::SetNextWindowPos(ImVec2(vp->Pos.x, atTop ? vp->Pos.y : vp->Pos.y + vp->Size.y - h), ImGuiCond_Always);
-    ImGui::SetNextWindowSize(ImVec2(vp->Size.x, h), ImGuiCond_Always);
+    const float panelY = atTop ? viewport->Pos.y : viewport->Pos.y + viewport->Size.y - height;
+    ImGui::SetNextWindowPos(ImVec2(viewport->Pos.x, panelY), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(viewport->Size.x, height), ImGuiCond_Always);
 
     const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
                                    ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBackground |
@@ -186,60 +223,55 @@ void RenderTaskbar(AppState& state)
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowMinSize, ImVec2(1.0f, 1.0f)); // allow a thin taskbar in a tiny window
-    ImGui::Begin(kTaskbarWindowName, nullptr, flags);
-
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    const ImVec2 p0 = ImGui::GetWindowPos();
-    const ImVec2 p1(p0.x + vp->Size.x, p0.y + h);
-
-    // panel + a thin border on the edge that faces the desktop
-    dl->AddRectFilled(p0, p1, g_settings.panelColor);
-    const float edgeY = atTop ? p1.y - 0.5f : p0.y + 0.5f;
-    dl->AddLine(ImVec2(p0.x, edgeY), ImVec2(p1.x, edgeY), g_settings.borderColor, 1.0f);
-
-    // left: brand, then the icon buttons
-    ImVec2 cursor(p0.x + g_settings.padding, p0.y);
-    const float brandW = DrawBrand(dl, cursor, h);
-    if (brandW > 0.0f) {
-        cursor.x += brandW + 14.0f;
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowMinSize, ImVec2(1.0f, 1.0f));
+    if (!ImGui::Begin(kTaskbarWindowName, nullptr, flags))
+    {
+        ImGui::End();
+        ImGui::PopStyleVar(4);
+        return;
     }
 
-    // The three required buttons. Each toggles its own shared flag in AppState.
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    const ImVec2 p0 = ImGui::GetWindowPos();
+    const ImVec2 p1(p0.x + viewport->Size.x, p0.y + height);
+
+    // Draw the border on the edge facing the desktop.
+    drawList->AddRectFilled(p0, p1, kSettings.panelColor);
+    const float edgeY = atTop ? p1.y - 0.5f : p0.y + 0.5f;
+    drawList->AddLine(ImVec2(p0.x, edgeY), ImVec2(p1.x, edgeY), kSettings.borderColor, 1.0f);
+
+    // Place the brand and app buttons from left to right.
+    ImVec2 cursor(p0.x + kSettings.padding, p0.y);
+    const float brandWidth = DrawBrand(drawList, cursor, height);
+    if (brandWidth > 0.0f)
+    {
+        cursor.x += brandWidth + 14.0f;
+    }
+
+    // Add taskbar entries here.
     const TaskbarButton buttons[] = {
-        { g_settings.firstAppLabel, DrawIconWindow, &AppState::showFirstApp },
-        { g_settings.secondAppLabel, DrawIconGrid, &AppState::showSecondApp },
-        { g_settings.taskManagerLabel, DrawIconActivity, &AppState::showTaskManager },
+        { kSettings.firstAppLabel, DrawTodoListIcon, &AppState::showFirstApp },
+        { kSettings.secondAppLabel, DrawMusicPlayerIcon, &AppState::showSecondApp },
+        { kSettings.taskManagerLabel, DrawTaskManagerIcon, &AppState::showTaskManager },
     };
     int runningCount = 0;
     int index = 0;
-    for (const TaskbarButton& btn : buttons) {
-        bool& flag = state.*(btn.flag);
-        float width = 0.0f;
+    for (const TaskbarButton& button : buttons)
+    {
+        bool& visible = state.*(button.visible);
         ImGui::PushID(index++);
-        if (DrawTaskbarButton(dl, btn, flag, cursor, h, &width)) {
-            flag = !flag; // closed -> open, open -> closed
-        }
+        const float width = DrawTaskbarButton(drawList, button, visible, cursor, height);
         ImGui::PopID();
-        cursor.x += width + g_settings.buttonSpacing;
-        if (flag) { // read after the click so the count never lags a frame
+        cursor.x += width + kSettings.buttonSpacing;
+        if (visible)
+        {
             ++runningCount;
         }
     }
 
-    // right: running-app summary
-    if (g_settings.showRunningCount) {
-        char text[32];
-        if (runningCount == 0) {
-            std::snprintf(text, sizeof(text), "No apps running");
-        } else {
-            std::snprintf(text, sizeof(text), "%d app%s running", runningCount, runningCount == 1 ? "" : "s");
-        }
-        const float fontSize = 14.0f;
-        ImFont* font = ImGui::GetFont();
-        const ImVec2 textSize = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, text);
-        dl->AddText(font, fontSize, ImVec2(p1.x - g_settings.padding - textSize.x, p0.y + (h - textSize.y) * 0.5f),
-                    runningCount > 0 ? g_settings.accentColor : IM_COL32(140, 148, 162, 255), text);
+    if (kSettings.showRunningCount)
+    {
+        DrawRunningCount(drawList, p0, p1, height, runningCount);
     }
 
     ImGui::End();
