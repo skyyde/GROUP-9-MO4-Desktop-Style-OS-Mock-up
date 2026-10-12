@@ -1,4 +1,9 @@
 ﻿# Group 9 - Desktop-Style OS Mock-up
+## Members:
+Aguirre, Mikyla Kirsten, P.
+Cruz, Enrique Mateo, A.
+Pallarca, Cedric, S.
+Reyes, Julian Nicos, S.
 
 A C++17 desktop simulation for CSOPESY, built with Dear ImGui, GLFW, and OpenGL.
 
