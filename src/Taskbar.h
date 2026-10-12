@@ -18,7 +18,7 @@ struct TaskbarSettings
     float height = 48.0f;        // Panel thickness; Desktop reserves this much space.
     float buttonHeight = 34.0f;
     float buttonSpacing = 6.0f;
-    float padding = 10.0f;       // Left/right inner margin of the panel.
+    float padding = 14.0f;       // Left/right inner margin of the panel.
 
     // Labels
     const char* brandText = "CSOPESY OS";
@@ -27,11 +27,13 @@ struct TaskbarSettings
     const char* taskManagerLabel = "Task Manager";
     bool showLabels = true;      // false = icon-only buttons (name still shown as tooltip).
     bool showRunningCount = true; // "N apps running" on the right side.
+    bool showPowerButton = true;
 
     // Colors
     ImU32 panelColor = IM_COL32(15, 18, 26, 235);
     ImU32 borderColor = IM_COL32(255, 255, 255, 40);
     ImU32 accentColor = IM_COL32(120, 255, 140, 255); // Running indicator (matches desktop status text).
+    ImU32 powerColor = IM_COL32(255, 82, 82, 255); 
 };
 
 // Call once before RenderDesktop each frame to reserve space for the panel.

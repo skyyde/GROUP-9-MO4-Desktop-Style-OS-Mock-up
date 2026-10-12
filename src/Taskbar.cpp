@@ -167,7 +167,7 @@ namespace
         return width;
     }
 
-    void DrawRunningCount(ImDrawList* drawList, ImVec2 panelMin, ImVec2 panelMax,
+    void DrawRunningCount(ImDrawList* drawList, ImVec2 panelMin, float rightX, float minX,
                           float panelHeight, int runningCount)
     {
         char text[32];
@@ -184,11 +184,48 @@ namespace
         ImFont* font = ImGui::GetFont();
         const ImVec2 textSize = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, text);
         const ImVec2 textPosition(
-            panelMax.x - kSettings.padding - textSize.x,
+            rightX - textSize.x,
             panelMin.y + (panelHeight - textSize.y) * 0.5f);
+        if (textPosition.x < minX)
+        {
+            return; // no room left of PWR, so skip the text instead of overlapping buttons.
+        }
         const ImU32 textColor = runningCount > 0
             ? kSettings.accentColor : IM_COL32(140, 148, 162, 255);
         drawList->AddText(font, fontSize, textPosition, textColor, text);
+    }
+
+    // PWR at the right end
+    // also uses the desktop's shutdown sequence 
+    float DrawPowerButton(ImDrawList* drawList, float rightX, float panelY, float panelHeight)
+    {
+        const float fontSize = 15.0f;
+        const float iconRadius = 7.0f;
+        const char* label = "PWR";
+        ImFont* font = ImGui::GetFont();
+        const float labelWidth = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, label).x;
+        const ImVec2 size(12.0f + iconRadius * 2.0f + 8.0f + labelWidth + 12.0f, kSettings.buttonHeight);
+        const ImVec2 p0(rightX - size.x, panelY + (panelHeight - size.y) * 0.5f);
+        const ImVec2 p1(p0.x + size.x, p0.y + size.y);
+
+        ImGui::SetCursorScreenPos(p0);
+        if (ImGui::InvisibleButton("##power", size))
+        {
+            RequestShutdown();
+        }
+        const bool hovered = ImGui::IsItemHovered();
+        const bool held = ImGui::IsItemActive();
+        ImGui::SetItemTooltip("Shut down CSOPESY OS");
+
+        const ImU32 backgroundColor = held ? IM_COL32(255, 82, 82, 70)
+            : hovered ? IM_COL32(255, 82, 82, 40) : IM_COL32(255, 82, 82, 16);
+        drawList->AddRectFilled(p0, p1, backgroundColor, 7.0f);
+        DrawPowerSymbol(drawList, ImVec2(p0.x + 12.0f + iconRadius, p0.y + size.y * 0.5f + 1.0f),
+            iconRadius, kSettings.powerColor);
+        drawList->AddText(font, fontSize,
+            ImVec2(p0.x + 12.0f + iconRadius * 2.0f + 8.0f, p0.y + (size.y - fontSize) * 0.5f),
+            kSettings.powerColor, label);
+        return size.x;
     }
 } // namespace
 
@@ -199,6 +236,7 @@ void ApplyTaskbarLayout()
     DesktopSettings& desktop = GetDesktopSettings();
     desktop.topReserved = kSettings.position == TaskbarPosition::Top ? height : 0.0f;
     desktop.bottomReserved = kSettings.position == TaskbarPosition::Bottom ? height : 0.0f;
+    desktop.showPowerButton = !kSettings.showPowerButton;
 }
 
 void RenderTaskbar(AppState& state)
@@ -269,9 +307,14 @@ void RenderTaskbar(AppState& state)
         }
     }
 
+    float rightX = p1.x - kSettings.padding;
+    if (kSettings.showPowerButton)
+    {
+        rightX -= DrawPowerButton(drawList, rightX, p0.y, height) + 14.0f;
+    }
     if (kSettings.showRunningCount)
     {
-        DrawRunningCount(drawList, p0, p1, height, runningCount);
+        DrawRunningCount(drawList, p0, rightX, cursor.x + 8.0f, height, runningCount);
     }
 
     ImGui::End();

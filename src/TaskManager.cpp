@@ -10,6 +10,13 @@
 
 namespace
 {
+    struct TaskManagerSettings
+    {
+        const char* title = "Task Manager";
+        ImVec2 defaultPosition = ImVec2(300.0f, 200.0f); // below and between the two apps
+        ImVec2 defaultSize = ImVec2(580.0f, 420.0f);
+    };
+
     struct ProcessItem
     {
         int pid;
@@ -26,9 +33,12 @@ namespace
         AppWindowState window;
         bool initialized = false;
         std::vector<ProcessItem> processes;
+        
         int selectedPid = -1;
+        bool wasOpen = false;
     };
 
+    const TaskManagerSettings kSettings;
     TaskManagerWindowState g_taskManager;
 
     void InitProcesses(AppState& state)
@@ -63,24 +73,29 @@ namespace
 
 void RenderTaskManager(AppState& state)
 {
-    if (!state.showTaskManager)
+        if (!state.showTaskManager)
     {
+        g_taskManager.wasOpen = false;
         return;
     }
 
     if (!g_taskManager.initialized)
     {
         InitProcesses(state);
+    }
+
+    if (!g_taskManager.wasOpen)
+    {
         ImGui::SetNextWindowFocus();
     }
 
     UpdateProcessMetrics(static_cast<float>(ImGui::GetTime()));
 
-    const ImVec2 defaultPos(220.0f, 100.0f);
-    const ImVec2 defaultSize(580.0f, 420.0f);
-    const ImGuiWindowFlags flags = ConfigureAppWindow(g_taskManager.window, defaultPos, defaultSize);
+    const ImGuiWindowFlags flags = ConfigureAppWindow(
+        g_taskManager.window, kSettings.defaultPosition, kSettings.defaultSize);
 
-    if (ImGui::Begin("Task Manager", &state.showTaskManager, flags))
+    if (ImGui::Begin(kSettings.title, &state.showTaskManager, flags))
+
     {
         RenderAppTitleBarControls(g_taskManager.window);
 
@@ -129,8 +144,9 @@ void RenderTaskManager(AppState& state)
             ImGuiTableFlags_BordersOuter | ImGuiTableFlags_BordersV |
             ImGuiTableFlags_ScrollY;
 
-        const float tableHeight = ImGui::GetContentRegionAvail().y - 36.0f;
-
+        const float tableHeight = ImGui::GetContentRegionAvail().y
+            - (ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.y * 3.0f);
+            
         if (ImGui::BeginTable("ProcessTable", 4, tableFlags, ImVec2(0.0f, tableHeight)))
         {
             ImGui::TableSetupScrollFreeze(0, 1);
@@ -213,5 +229,6 @@ void RenderTaskManager(AppState& state)
             }
         }
     }
-    ImGui::End();
+        ImGui::End();
+    g_taskManager.wasOpen = state.showTaskManager;
 }

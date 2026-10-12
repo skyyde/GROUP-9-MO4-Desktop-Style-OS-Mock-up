@@ -14,7 +14,7 @@ namespace
     struct TodoListSettings
     {
         const char* title = "To-Do List";
-        ImVec2 defaultPosition = ImVec2(100.0f, 70.0f);
+        ImVec2 defaultPosition = ImVec2(60.0f, 70.0f);
         ImVec2 defaultSize = ImVec2(420.0f, 400.0f);
         ImU32 accentColor = IM_COL32(120, 255, 140, 255);
     };

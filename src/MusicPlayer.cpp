@@ -15,8 +15,8 @@ namespace
     struct MusicPlayerSettings
     {
         const char* title = "Music Player";
-        ImVec2 defaultPosition = ImVec2(280.0f, 90.0f);
-        ImVec2 defaultSize = ImVec2(420.0f, 400.0f);
+        ImVec2 defaultPosition = ImVec2(500.0f, 70.0f);
+        ImVec2 defaultSize = ImVec2(460.0f, 450.0f);
         int defaultVolume = 70;
         bool autoplay = false;
         ImU32 accentColor = IM_COL32(120, 255, 140, 255);

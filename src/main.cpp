@@ -98,6 +98,7 @@ int main()
     ImGui::CreateContext();
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     ImGui::StyleColorsDark();
+    ApplyOSTheme();
 
     // Install GLFW input callbacks for mouse and keyboard controls.
     if (!ImGui_ImplGlfw_InitForOpenGL(window, true)) {

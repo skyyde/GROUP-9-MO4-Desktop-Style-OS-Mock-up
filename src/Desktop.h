@@ -58,3 +58,7 @@ void RequestShutdown();
 
 // confirm shutdown, followed by true shutdown (atleast it should pls lmk if it doesn't)
 bool IsShuttingDown();
+
+void ApplyOSTheme();
+
+void DrawPowerSymbol(ImDrawList* drawList, ImVec2 center, float radius, ImU32 color);
